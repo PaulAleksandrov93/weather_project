@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Weather App</title>
+    <link href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/jqueryui/1.12.1/jquery-ui.min.css">
+    <script src="https://code.jquery.com/jquery-3.5.1.min.js"></script>
+    <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jqueryui/1.12.1/jquery-ui.min.js"></script>
+    <style>
+        .loading {
+            display: none;
+            text-align: center;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="jumbotron">
+            <h1 class="display-4">Weather Forecast</h1>
+            <p class="lead">Enter a city to get the weather forecast.</p>
+            <form id="city-form">
+                <div class="form-row align-items-center">
+                    <div class="col-auto">
+                        <input type="text" class="form-control mb-2" id="city-input" placeholder="Enter city" autocomplete="off">
+                    </div>
+                    <div class="col-auto">
+                        <button type="submit" class="btn btn-primary mb-2">Get Weather</button>
+                    </div>
+                </div>
+            </form>
+            <div id="weather-result" class="mt-4"></div>
+            <div id="loading" class="loading">
+                <div class="spinner-border text-primary" role="status">
+                    <span class="sr-only">Loading...</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    $(document).ready(function() {
+        // Функция для инициализации автодополнения городов
+        $("#city-input").autocomplete({
+            source: function(request, response) {
+                $.ajax({
+                    url: "http://api.geonames.org/searchJSON",  // GeoNames Search API endpoint
+                    method: "GET",
+                    dataType: "json",
+                    data: {
+                        q: request.term,
+                        maxRows: 10,
+                        username: 'cayman314'
+                    },
+                    success: function(data) {
+                        response($.map(data.geonames, function(item) {
+                            return {
+                                label: item.name + ', ' + item.countryName,
+                                value: item.name
+                            };
+                        }));
+                    }
+                });
+            },
+            minLength: 2  // Минимальная длина ввода перед началом поиска
+        });
+
+        // Функция для обработки отправки формы
+        $('#city-form').submit(function(event) {
+            event.preventDefault();
+            var city = $('#city-input').val();
+            $('#weather-result').empty();
+            $('#loading').show();
+            $.ajax({
+                url: '/api/weather/' + encodeURIComponent(city) + '/',
+                method: 'GET',
+                success: function(data) {
+                    // Сохранение в localStorage
+                    saveSearch(city);
+
+                    $('#loading').hide();
+                    $('#weather-result').html('<h3>Weather in ' + city + '</h3>');
+                    // Словарь для хранения данных по дням недели
+                    var weeklyWeather = {};
+                    
+                    // Обработка данных
+                    for (var i = 0; i < data.date.length; i++) {
+                        var date = new Date(data.date[i]);
+                        var dayOfWeek = date.getDay(); // Получаем день недели (0 - воскресенье, 1 - понедельник, и т.д.)
+                        var dayKey = date.toDateString(); // Ключ - день
+                        var temperature = parseFloat(data.temperature_2m[i]); // Температура
+                        
+                        // Если такой день еще не встречался, добавляем его в словарь
+                        if (!weeklyWeather[dayKey]) {
+                            weeklyWeather[dayKey] = {
+                                morning: [],
+                                day: [],
+                                evening: [],
+                                night: []
+                            };
+                        }
+                        
+                        // Определяем время суток и добавляем температуру в соответствующий список
+                        if (date.getHours() < 6) { // Ночь (00:00 - 06:00)
+                            weeklyWeather[dayKey].night.push(temperature);
+                        } else if (date.getHours() < 12) { // Утро (06:00 - 12:00)
+                            weeklyWeather[dayKey].morning.push(temperature);
+                        } else if (date.getHours() < 18) { // День (12:00 - 18:00)
+                            weeklyWeather[dayKey].day.push(temperature);
+                        } else { // Вечер (18:00 - 00:00)
+                            weeklyWeather[dayKey].evening.push(temperature);
+                        }
+                    }
+                    
+                    // Выводим данные по дням недели
+                    for (var day in weeklyWeather) {
+                        if (weeklyWeather.hasOwnProperty(day)) {
+                            // Вычисляем средние значения температур для каждой части дня
+                            var morningAvg = average(weeklyWeather[day].morning);
+                            var dayAvg = average(weeklyWeather[day].day);
+                            var eveningAvg = average(weeklyWeather[day].evening);
+                            var nightAvg = average(weeklyWeather[day].night);
+                            
+                            // Выводим карточку с информацией по дню недели
+                            $('#weather-result').append('<div class="card mb-3"><div class="card-body"><h5 class="card-title">' + day + '</h5><p class="card-text">Morning: ' + morningAvg.toFixed(1) + '°C<br>Day: ' + dayAvg.toFixed(1) + '°C<br>Evening: ' + eveningAvg.toFixed(1) + '°C<br>Night: ' + nightAvg.toFixed(1) + '°C</p></div></div>');
+                        }
+                    }
+                },
+                error: function(xhr, textStatus, errorThrown) {
+                    $('#loading').hide();
+                    var errorMessage = 'Error fetching weather data for ' + city;
+                    if (xhr.responseJSON && xhr.responseJSON.error) {
+                        errorMessage += ': ' + xhr.responseJSON.error;
+                    }
+                    $('#weather-result').html('<p>' + errorMessage + '</p>');
+                }
+            });
+        });
+
+        // Функция для вычисления среднего значения массива
+        function average(array) {
+            if (array.length === 0) return 0;
+            var sum = array.reduce(function(a, b) { return a + b; });
+            return sum / array.length;
+        }
+
+        // Функция для сохранения поиска в localStorage
+        function saveSearch(city) {
+            var searches = localStorage.getItem('weatherSearches');
+            if (searches) {
+                searches = JSON.parse(searches);
+            } else {
+                searches = [];
+            }
+
+            // Добавляем новый город в историю поиска
+            searches.push(city);
+            localStorage.setItem('weatherSearches', JSON.stringify(searches));
+        }
+
+        // Проверяем наличие предыдущего поиска и предлагаем его
+        var searches = JSON.parse(localStorage.getItem('weatherSearches')) || [];
+        if (searches.length > 0) {
+            var lastCity = searches[searches.length - 1];
+            $('#weather-result').html('<p>Would you like to see weather in ' + lastCity + ' again?</p><button id="showLastCityWeather" class="btn btn-primary">Show Weather</button>');
+
+            // Обработчик кнопки "Show Weather"
+            $('#weather-result').on('click', '#showLastCityWeather', function() {
+                $('#city-input').val(lastCity);
+                $('#city-form').submit();
+            });
+        }
+    });
+    </script>
+</body>
+</html>
