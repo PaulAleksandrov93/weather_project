@@ -47,7 +47,7 @@
         $("#city-input").autocomplete({
             source: function(request, response) {
                 $.ajax({
-                    url: "http://api.geonames.org/searchJSON",  // GeoNames Search API endpoint
+                    url: "http://api.geonames.org/searchJSON", 
                     method: "GET",
                     dataType: "json",
                     data: {
